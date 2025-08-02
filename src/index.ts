@@ -12,7 +12,7 @@ function getVersion(): string {
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
     return packageJson.version;
   } catch (error) {
-    return '0.2.16'; // fallback version
+    return '0.6.0'; // fallback version
   }
 }
 

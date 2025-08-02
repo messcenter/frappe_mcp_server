@@ -300,11 +300,23 @@ export async function listDocuments(
     try {
       const response = await frappe.db().getDocList(doctype, optionsForGetDocList as any); // Cast to any to resolve complex type issue for now, focusing on runtime
 
+      console.error(`[listDocuments] Raw response for ${doctype}:`, JSON.stringify(response, null, 2));
+
       if (!response) {
         throw new Error(`Invalid response format for listing ${doctype}`);
       }
 
-      return response;
+      // Frappe API typically returns {data: [...]} but SDK might unwrap it
+      // Let's handle both cases
+      const responseData = response as any;
+      if (Array.isArray(responseData)) {
+        return responseData;
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        return responseData.data;
+      } else {
+        console.error(`[listDocuments] Unexpected response format:`, responseData);
+        return responseData;
+      }
     } catch (sdkError) {
       // Re-throw the error to be handled by the existing handleApiError
       throw sdkError;

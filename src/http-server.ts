@@ -239,7 +239,7 @@ app.post('/', async (req, res) => {
       const toolList = Object.entries(tools).map(([name, tool]) => ({
         name,
         description: tool.description,
-        inputSchema: tool.schema.shape ? tool.schema._def.shape() : {}
+        inputSchema: { type: "object", properties: {}, additionalProperties: true }
       }));
       
       return res.json({

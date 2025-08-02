@@ -1,0 +1,17 @@
+[Unit]
+Description=Frappe MCP Server (Streamable HTTP Transport)
+After=network.target
+
+[Service]
+Type=simple
+User=kmadmin
+WorkingDirectory=/opt/frappe_mcp_server
+ExecStart=/home/kmadmin/.nvm/versions/node/v20.19.3/bin/node /opt/frappe_mcp_server/build/streamable-http-server.js
+Environment=FRAPPE_URL=http://127.0.0.1:8000
+Environment=FRAPPE_API_KEY=2228c4848598343
+Environment=FRAPPE_API_SECRET=7ad296bdfcfb823
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

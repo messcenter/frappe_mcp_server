@@ -54,7 +54,14 @@ export function setupHelperTools(server: McpServer): void {
         };
         const doctypes = await findDocTypes(searchTerm, options);
         return {
-          content: [{ type: "text", text: JSON.stringify(doctypes, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: `Found ${doctypes.length} DocTypes:\n\n` + doctypes.map(doctype => 
+                `• ${doctype.name} (${doctype.module})${doctype.description ? ' - ' + doctype.description : ''}${doctype.istable ? ' [Table]' : ''}${doctype.issingle ? ' [Single]' : ''}`
+              ).join('\n')
+            }
+          ]
         };
       } catch (error) {
         return formatErrorResponse(error, "find_doctypes");
@@ -71,7 +78,12 @@ export function setupHelperTools(server: McpServer): void {
       try {
         const modules = await getModuleList();
         return {
-          content: [{ type: "text", text: JSON.stringify(modules, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: `Frappe Modules (${modules.length} total):\n\n` + modules.map(m => `• ${m}`).join('\n')
+            }
+          ]
         };
       } catch (error) {
         return formatErrorResponse(error, "get_module_list");
@@ -90,7 +102,15 @@ export function setupHelperTools(server: McpServer): void {
       try {
         const doctypes = await getDocTypesInModule(module);
         return {
-          content: [{ type: "text", text: JSON.stringify(doctypes, null, 2) }],
+          content: [
+            {
+              type: "list",
+              items: doctypes.map(doctype => ({
+                type: "text",
+                text: `${doctype.name} (${doctype.module})${doctype.description ? ' - ' + doctype.description : ''}`
+              }))
+            }
+          ]
         };
       } catch (error) {
         return formatErrorResponse(error, "get_doctypes_in_module");

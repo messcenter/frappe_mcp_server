@@ -5,7 +5,7 @@
   "main": "build/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\" && node -e \"require('fs').chmodSync('build/http-server.js', '755')\" && node -e \"require('fs').chmodSync('build/streamable-http-server.js', '755')\" && node -e \"require('fs').chmodSync('build/agents/mcp-server-publisher.js', '755')\"",
+    "build": "tsc && shx chmod +x build/index.js build/http-server.js build/streamable-http-server.js build/agents/mcp-server-publisher.js",
     "start": "node build/index.js",
     "start-http": "node build/http-server.js --http",
     "start-streamable": "node build/streamable-http-server.js",
@@ -52,8 +52,9 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^22.13.10",
+    "shx": "^0.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "typescript": "^5.9.2"
   },
   "engines": {
     "node": ">=18.0.0"

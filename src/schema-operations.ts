@@ -22,48 +22,7 @@ import {
 } from "./app-introspection.js";
 
 // Define schema tools
-export const SCHEMA_TOOLS = [
-  {
-    name: "get_doctype_schema",
-    description: "Get the complete schema for a DocType including field definitions, validations, and linked DocTypes. Use this to understand the structure of a DocType before creating or updating documents.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        doctype: { type: "string", description: "DocType name" }
-      },
-      required: ["doctype"]
-    }
-  },
-  {
-    name: "get_field_options",
-    description: "Get available options for a Link or Select field. For Link fields, returns documents from the linked DocType. For Select fields, returns the predefined options.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        doctype: { type: "string", description: "DocType name" },
-        fieldname: { type: "string", description: "Field name" },
-        filters: {
-          type: "object",
-          description: "Filters to apply to the linked DocType (optional, for Link fields only)",
-          additionalProperties: true
-        }
-      },
-      required: ["doctype", "fieldname"]
-    }
-  },
-  {
-    name: "get_frappe_usage_info",
-    description: "Get combined information about a DocType or workflow, including schema metadata and usage guidance from static hints.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        doctype: { type: "string", description: "DocType name (optional if workflow is provided)" },
-        workflow: { type: "string", description: "Workflow name (optional if doctype is provided)" }
-      },
-      required: []
-    }
-  }
-];
+// SCHEMA_TOOLS array removed - now using modern MCP SDK API with server.tool() registration
 
 /**
  * Format error response with detailed information
@@ -567,7 +526,7 @@ export function setupSchemaTools(server: McpServer): void {
     }
   );
 
-  // TODO: Register schema resources with new McpServer API
-  // The new McpServer API handles resources differently
-  // For now, we'll focus on tools and add resources later
+  // Schema resources are not currently needed for the MCP implementation
+  // All schema functionality is provided through tools
+  // Resources can be added in future versions if needed
 }
