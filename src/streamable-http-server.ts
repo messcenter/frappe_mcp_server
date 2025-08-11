@@ -43,7 +43,7 @@ import { getDocTypeHints, getWorkflowHints, findWorkflowsForDocType } from './st
 import { getDocTypeUsageInstructions, getAppForDocType, getAppUsageInstructions } from './app-introspection.js';
 
 const app = express();
-const port = process.env.PORT || 0xCAF1; // Port 51953 = 0xCAF1 (CAFE+1) in hex
+const port: number = Number(process.env.PORT) || 0xCAF1; // Port 51953 = 0xCAF1 (CAFE+1) in hex
 
 // Session management
 interface Session {
@@ -51,7 +51,8 @@ interface Session {
   clientId?: string;
   createdAt: Date;
   lastActivity: Date;
-  messageQueue: any[];
+  messageQueue: { id: number; data: any }[];
+  lastEventId: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -62,7 +63,7 @@ app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? ['https://claude.ai', 'https://cursor.sh'] : '*',
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id', 'x-api-key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-ID', 'x-api-key']
 }));
 
 app.use(express.json({ limit: '4mb' }));
@@ -73,7 +74,7 @@ app.use(metricsMiddleware);
 
 // Session middleware
 app.use((req, res, next) => {
-  const sessionId = req.headers['x-session-id'] as string;
+  const sessionId = (req.headers['mcp-session-id'] || req.headers['x-session-id']) as string;
   
   if (sessionId) {
     const session = sessions.get(sessionId);
@@ -152,7 +153,14 @@ const tools = {
     }),
     handler: async (params: any) => {
       const exists = await doesDocTypeExist(params.doctype);
-      return { content: [{ type: "text", text: JSON.stringify({ exists }, null, 2) }] };
+      return {
+        content: [{
+          type: "text",
+          text: `DocType "${params.doctype}" ${exists ? 'exists' : 'does not exist'}`
+        }],
+        structuredContent: { exists },
+        isError: false
+      };
     }
   },
 
@@ -381,7 +389,12 @@ const tools = {
     }),
     handler: async (params: any) => {
       const result = await callMethod(params.method, params.params || {});
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      const payload = (result && typeof result === 'object' && 'message' in result)
+        ? (result as any).message
+        : result;
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+      };
     }
   },
 
@@ -533,7 +546,7 @@ const tools = {
 };
 
 // Helper to determine if a method should stream
-function shouldStream(method: string, userAgent?: string): boolean {
+function shouldStream(method: string, userAgent?: string, acceptHeader?: string): boolean {
   // Cursor doesn't handle SSE properly, disable streaming for it
   if (userAgent?.includes('Cursor')) {
     return false;
@@ -543,9 +556,14 @@ function shouldStream(method: string, userAgent?: string): boolean {
   const streamableMethods = [
     'resources/read', // Large resource reads
     'prompts/run', // Interactive prompts
+    'tools/call', // Allow streaming tool outputs when client requests SSE
   ];
   
-  return streamableMethods.some(m => method?.startsWith(m));
+  const methodEligible = streamableMethods.some(m => method?.startsWith(m));
+  if (!methodEligible) return false;
+  // Only stream if client explicitly accepts SSE for POST case
+  if (acceptHeader && acceptHeader.includes('text/event-stream')) return true;
+  return false;
 }
 
 // Helper to send SSE message
@@ -554,15 +572,34 @@ function sendSSE(res: express.Response, data: any) {
   res.write(message);
 }
 
+// Helper to send SSE message with incrementing ID and record for replay
+function sendSSEWithId(res: express.Response, session: Session, data: any) {
+  session.lastEventId = (session.lastEventId || 0) + 1;
+  const idLine = `id: ${session.lastEventId}\n`;
+  const dataLine = `data: ${JSON.stringify(data)}\n\n`;
+  // store for resumability
+  session.messageQueue.push({ id: session.lastEventId, data });
+  // keep only recent 100 messages to bound memory
+  if (session.messageQueue.length > 100) session.messageQueue.shift();
+  res.write(idLine + dataLine);
+}
+
 // GET endpoint for Streamable HTTP SSE connections
 app.get('/', async (req, res) => {
+  // Require proper SSE Accept header per MCP spec
+  const accept = (req.headers['accept'] || '') as string;
+  if (!accept.includes('text/event-stream')) {
+    return res.status(405).send('Method Not Allowed');
+  }
+
   // This is for Streamable HTTP SSE connections from clients like Cursor
-  const sessionId = crypto.randomUUID();
+  const sessionId = randomUUID();
   const session: Session = {
     id: sessionId,
     createdAt: new Date(),
     lastActivity: new Date(),
-    messageQueue: []
+    messageQueue: [],
+    lastEventId: 0
   };
   sessions.set(sessionId, session);
   updateSessionMetrics(sessions.size, sessions.size);
@@ -574,14 +611,25 @@ app.get('/', async (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Accept, mcp-protocol-version',
+    'Access-Control-Allow-Origin': (req.headers.origin as string) || 'null',
+    'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'x-session-id': sessionId
+    'Mcp-Session-Id': sessionId
   });
 
+  // Handle resumability: if Last-Event-ID provided, replay missed messages
+  const lastEventIdHeader = (req.headers['last-event-id'] || req.headers['last-event-id'.toLowerCase()]) as string | undefined;
+  const lastEventId = lastEventIdHeader ? Number(lastEventIdHeader) : undefined;
+  if (lastEventId && !Number.isNaN(lastEventId)) {
+    const missed = session.messageQueue.filter(m => m.id > lastEventId);
+    for (const m of missed) {
+      // resend with original IDs
+      res.write(`id: ${m.id}\n` + `data: ${JSON.stringify(m.data)}\n\n`);
+    }
+  }
+
   // Send welcome message
-  sendSSE(res, {
+  sendSSEWithId(res, session, {
     type: 'welcome',
     sessionId: sessionId,
     protocolVersion: '2025-06-18',
@@ -630,14 +678,15 @@ app.post('/', async (req, res) => {
         id: randomUUID(),
         createdAt: new Date(),
         lastActivity: new Date(),
-        messageQueue: []
+        messageQueue: [],
+        lastEventId: 0
       };
       sessions.set(session.id, session);
-      res.setHeader('x-session-id', session.id);
+      res.setHeader('Mcp-Session-Id', session.id);
     }
 
     // Determine if we should stream the response
-    const streaming = shouldStream(method, req.headers['user-agent']) && req.headers.accept?.includes('text/event-stream');
+    const streaming = shouldStream(method, req.headers['user-agent'] as string | undefined, req.headers.accept as string | undefined);
     
     if (streaming) {
       // Set up SSE headers
@@ -646,18 +695,28 @@ app.post('/', async (req, res) => {
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no', // Disable nginx buffering
-        'x-session-id': session?.id || ''
+        'Mcp-Session-Id': session?.id || ''
       });
 
       // Send initial response
-      sendSSE(res, {
+      if (session) {
+        sendSSEWithId(res, session, {
         jsonrpc: "2.0",
         id,
         result: {
           streaming: true,
           sessionId: session?.id
         }
-      });
+        });
+      } else {
+        sendSSE(res, {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            streaming: true
+          }
+        });
+      }
 
       // Keep connection alive
       const heartbeat = setInterval(() => {
@@ -699,7 +758,11 @@ app.post('/', async (req, res) => {
         };
 
         if (streaming) {
-          sendSSE(res, { jsonrpc: "2.0", id, result });
+          if (session) {
+            sendSSEWithId(res, session, { jsonrpc: "2.0", id, result });
+          } else {
+            sendSSE(res, { jsonrpc: "2.0", id, result });
+          }
           res.end();
         } else {
           res.json({ jsonrpc: "2.0", id, result });
@@ -1023,7 +1086,8 @@ app.post('/', async (req, res) => {
         if (streaming) {
           res.end();
         } else {
-          res.status(204).end(); // No Content
+          // Some clients treat 204 as failure for notifications; return 200 OK
+          res.status(200).end();
         }
         break;
       }
@@ -1040,7 +1104,8 @@ app.post('/', async (req, res) => {
             }
           });
         } else {
-          res.status(204).end(); // No content for notifications
+          // Return 200 instead of 204 to satisfy clients expecting OK
+          res.status(200).end();
         }
         break;
       }
@@ -1240,12 +1305,13 @@ async function startServer() {
     await initializeAppIntrospection();
     logger.info("App introspection initialized successfully");
 
-    // Start server
-    app.listen(port, () => {
+    // Start server (host is configurable; default to localhost per MCP security guidance)
+    const host = process.env.HOST || '0.0.0.0';
+    app.listen(port, host, () => {
       const toolCount = Object.keys(tools).length;
       const categoryCount = Object.keys(getToolCategories()).length;
-      
-      logger.startup(`Frappe MCP Server v${getVersion()} running at http://localhost:${port}`);
+
+      logger.startup(`Frappe MCP Server v${getVersion()} running at http://${host}:${port}`);
       logger.server(`Port ${port} = 0xCAF1 in hexadecimal. The next evolution of Frappe Café! ☕`);
       
       logger.info(`📋 Available Endpoints:`);

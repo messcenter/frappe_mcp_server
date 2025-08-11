@@ -186,6 +186,20 @@ export function securityMiddleware(req: Request, res: Response, next: NextFuncti
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   
+  // Origin validation per MCP Streamable HTTP guidance
+  if (process.env.NODE_ENV === 'production') {
+    const origin = (req.headers.origin as string) || '';
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1,http://localhost').split(',');
+    if (origin && !allowedOrigins.includes(origin)) {
+      logger.warn(`Blocked request from disallowed origin: ${origin}`);
+      return res.status(403).json({
+        jsonrpc: "2.0",
+        id: req.body?.id || null,
+        error: { code: -32000, message: 'Forbidden origin' }
+      });
+    }
+  }
+  
   // API key validation for production
   if (process.env.NODE_ENV === 'production' && process.env.MCP_API_KEY) {
     const providedKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');

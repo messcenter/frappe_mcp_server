@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { initializeStaticHints } from './static-hints.js';
 import { initializeAppIntrospection } from './app-introspection.js';
 import { validateApiCredentials } from './auth.js';
+import { zodToJsonSchema } from './schema-generator.js';
 
 // Import all tool functions directly
 import { findDocTypes, getModuleList, getDocTypesInModule, doesDocTypeExist, doesDocumentExist, getDocumentCount, getNamingSeriesInfo, getRequiredFields } from './frappe-helpers.js';
@@ -72,7 +73,12 @@ const tools = {
     }),
     handler: async (params: any) => {
       const exists = await doesDocTypeExist(params.doctype);
-      return { content: [{ type: "text", text: JSON.stringify({ exists }, null, 2) }] };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ doctype: params.doctype, exists }, null, 2)
+        }]
+      };
     }
   },
 
@@ -239,7 +245,7 @@ app.post('/', async (req, res) => {
       const toolList = Object.entries(tools).map(([name, tool]) => ({
         name,
         description: tool.description,
-        inputSchema: { type: "object", properties: {}, additionalProperties: true }
+        inputSchema: zodToJsonSchema(tool.schema)
       }));
       
       return res.json({

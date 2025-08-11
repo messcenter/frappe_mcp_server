@@ -676,14 +676,14 @@ export async function handleCallMethodToolCall(request: any): Promise<any> {
     console.error(`About to call method: ${method} with params:`, JSON.stringify(params, null, 2));
     const result = await callMethod(method, params);
     console.error(`Method call successful, result:`, JSON.stringify(result, null, 2));
-    
+    const payload = (result && typeof result === 'object' && 'message' in result)
+      ? (result as any).message
+      : result;
     return {
       content: [
-        {
-          type: "text",
-          text: `Method ${method} called successfully:\n\n${JSON.stringify(result, null, 2)}`,
-        },
-      ],
+        { type: "text", text: `Method ${method} called successfully` },
+        { type: "text", text: JSON.stringify(payload, null, 2) }
+      ]
     };
   } catch (error) {
     console.error(`Error in handleCallMethodToolCall:`, error);
